@@ -341,6 +341,48 @@
         input[type="file"] {
             display: none;
         }
+
+        /* プレビューモーダル */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .modal-content {
+            background: #fff;
+            padding: 20px;
+            border-radius: 12px;
+            max-width: 90%;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+        }
+
+        .modal-content img {
+            max-width: 100%;
+            max-height: 60vh;
+            object-fit: contain;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+        }
+
+        .modal-buttons {
+            display: flex;
+            gap: 10px;
+            width: 100%;
+        }
     </style>
 </head>
 <body>
@@ -439,8 +481,8 @@
             </div>
 
             <div style="width: 100%; max-width: 400px;">
-                <button class="btn btn-success" onclick="exportImage()">
-                    現在の開封状況を画像保存
+                <button class="btn btn-success" onclick="openPreviewModal()">
+                    現在の開封状況を画像化（長押し保存）
                 </button>
             </div>
         </div>
@@ -465,6 +507,19 @@
                     <div class="layer-category-title">■ 通常パネル（マス目）</div>
                     <ul class="layer-list" id="gridLayerList"></ul>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- プレビューモーダル -->
+    <div class="modal-overlay" id="previewModal" onclick="closePreviewModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="panel-title" style="margin-bottom: 0;">画像を長押し、または保存してください</div>
+            <p style="font-size: 0.75rem; color: #666; text-align: center;">スマホでは画像を長押しして「写真に追加」や「画像を保存」が行えます。</p>
+            <img id="previewImage" alt="開封状況プレビュー">
+            <div class="modal-buttons">
+                <button class="btn btn-outline" onclick="closePreviewModal()">閉じる</button>
+                <button class="btn btn-success" onclick="downloadImage()">端末にダウンロード</button>
             </div>
         </div>
     </div>
@@ -495,14 +550,11 @@
         const cutoutContainer = document.getElementById('cutoutLayersContainer');
 
         window.onload = () => {
-            // 最初にローカルストレージから保存データを読み込む
             loadSavedState();
-
             adjustCanvasScale();
             if (!baseImage) {
                 drawPlaceholder();
             }
-
             rebuildAll();
             setupUnifiedEvents();
             window.addEventListener('resize', adjustCanvasScale);
@@ -570,9 +622,29 @@
             reader.onload = (event) => {
                 const img = new Image();
                 img.onload = () => {
-                    baseImage = img;
-                    adjustCanvasScale();
-                    rebuildAll();
+                    const maxUploadWidth = 1200;
+                    let w = img.width;
+                    let h = img.height;
+
+                    if (w > maxUploadWidth) {
+                        h = Math.round((h * maxUploadWidth) / w);
+                        w = maxUploadWidth;
+                    }
+
+                    const tempCnv = document.createElement('canvas');
+                    tempCnv.width = w;
+                    tempCnv.height = h;
+                    const tCtx = tempCnv.getContext('2d');
+                    tCtx.drawImage(img, 0, 0, w, h);
+
+                    const compressedDataUrl = tempCnv.toDataURL('image/png');
+                    const compressedImg = new Image();
+                    compressedImg.onload = () => {
+                        baseImage = compressedImg;
+                        adjustCanvasScale();
+                        rebuildAll();
+                    };
+                    compressedImg.src = compressedDataUrl;
                 };
                 img.src = event.target.result;
             };
@@ -594,7 +666,6 @@
                 size: Math.min(canvasWidth, canvasHeight) * 0.25,
                 rotation: 0
             });
-
             rebuildAll();
         }
 
@@ -720,7 +791,6 @@
 
             let idx = 1;
 
-            // 1. マス目の生成
             for (let r = 0; r < gridRows; r++) {
                 for (let c = 0; c < gridCols; c++) {
                     const rx = c * cellW, ry = r * cellH;
@@ -785,7 +855,6 @@
                 }
             }
 
-            // 2. 特殊パーツの生成
             shapes.forEach((s, sIdx) => {
                 const shapePath = getShapePath2D(s);
                 const regionId = s.id;
@@ -826,9 +895,7 @@
                 });
             });
 
-            // 保存されていた表示状態（開閉状態）をここで復元適用する
             applySavedVisibility();
-
             drawOverlay();
             saveState();
         }
@@ -1104,7 +1171,9 @@
             document.getElementById('progressBar').style.width = `${percent}%`;
         }
 
-        function exportImage() {
+        let currentExportDataUrl = '';
+
+        function openPreviewModal() {
             const exportCanvas = document.createElement('canvas');
             exportCanvas.width = canvasWidth;
             exportCanvas.height = canvasHeight;
@@ -1122,9 +1191,20 @@
 
             eCtx.drawImage(overlayCanvas, 0, 0);
 
+            currentExportDataUrl = exportCanvas.toDataURL('image/png');
+            document.getElementById('previewImage').src = currentExportDataUrl;
+            document.getElementById('previewModal').style.display = 'flex';
+        }
+
+        function closePreviewModal() {
+            document.getElementById('previewModal').style.display = 'none';
+        }
+
+        function downloadImage() {
+            if (!currentExportDataUrl) return;
             const link = document.createElement('a');
             link.download = `panel_open_${Date.now()}.png`;
-            link.href = exportCanvas.toDataURL('image/png');
+            link.href = currentExportDataUrl;
             link.click();
         }
 
