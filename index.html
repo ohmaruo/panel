@@ -129,7 +129,7 @@
 
         #interactiveCanvas {
             z-index: 50;
-            cursor: pointer;
+            cursor: move;
         }
 
         .progress-card {
@@ -539,8 +539,6 @@
         let draggedShape = null;
         let dragOffsetX = 0;
         let dragOffsetY = 0;
-        let startPos = { x: 0, y: 0 };
-        let isMoved = false;
 
         const bgCanvas = document.getElementById('bgCanvas');
         const bgCtx = bgCanvas.getContext('2d', { willReadFrequently: true });
@@ -556,7 +554,7 @@
                 drawPlaceholder();
             }
             rebuildAll();
-            setupUnifiedEvents();
+            setupShapeDragEvents();
             window.addEventListener('resize', adjustCanvasScale);
         };
 
@@ -954,7 +952,8 @@
             });
         }
 
-        function setupUnifiedEvents() {
+        // 特殊パーツをキャンバス上で動かすためのドラッグ専用イベント
+        function setupShapeDragEvents() {
             const getPos = (e) => {
                 const rect = interactiveCanvas.getBoundingClientRect();
                 const scaleX = canvasWidth / rect.width;
@@ -976,8 +975,6 @@
 
             const handleStart = (e) => {
                 const pos = getPos(e);
-                startPos = { x: pos.x, y: pos.y };
-                isMoved = false;
 
                 for (let i = shapes.length - 1; i >= 0; i--) {
                     const s = shapes[i];
@@ -987,20 +984,15 @@
                         draggedShape = s;
                         dragOffsetX = pos.x - s.x;
                         dragOffsetY = pos.y - s.y;
+                        e.preventDefault();
                         break;
                     }
                 }
             };
 
             const handleMove = (e) => {
-                const pos = getPos(e);
-                const dist = Math.hypot(pos.x - startPos.x, pos.y - startPos.y);
-
-                if (dist > 5) {
-                    isMoved = true;
-                }
-
                 if (isDragging && draggedShape) {
+                    const pos = getPos(e);
                     draggedShape.x = pos.x - dragOffsetX;
                     draggedShape.y = pos.y - dragOffsetY;
                     processSegmentation();
@@ -1009,17 +1001,6 @@
             };
 
             const handleEnd = () => {
-                if (!isMoved && startPos) {
-                    const pos = startPos;
-                    for (let i = layerRegions.length - 1; i >= 0; i--) {
-                        const layer = layerRegions[i];
-                        if (layer.isVisible && overlayCtx.isPointInPath(layer.path, pos.x, pos.y)) {
-                            toggleLayerVisibility(layer.id);
-                            break;
-                        }
-                    }
-                }
-
                 isDragging = false;
                 draggedShape = null;
             };
