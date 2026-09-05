@@ -495,22 +495,15 @@
         const cutoutContainer = document.getElementById('cutoutLayersContainer');
 
         window.onload = () => {
+            // 最初にローカルストレージから保存データを読み込む
+            loadSavedState();
+
             adjustCanvasScale();
-            drawPlaceholder();
-
-            const savedVisibility = loadSavedState();
-            rebuildAll();
-
-            if (savedVisibility) {
-                layerRegions.forEach(l => {
-                    if (savedVisibility[l.id] !== undefined) {
-                        l.isVisible = savedVisibility[l.id];
-                        l.canvas.style.display = l.isVisible ? 'block' : 'none';
-                    }
-                });
-                updateCounters();
+            if (!baseImage) {
+                drawPlaceholder();
             }
 
+            rebuildAll();
             setupUnifiedEvents();
             window.addEventListener('resize', adjustCanvasScale);
         };
@@ -520,6 +513,7 @@
                 localStorage.removeItem('panel_tool_state');
                 shapes = [];
                 customNames = {};
+                baseImage = null;
                 document.getElementById('gridRows').value = 3;
                 document.getElementById('gridCols').value = 3;
                 document.getElementById('panelColor').value = "#ff7ebb";
@@ -527,6 +521,8 @@
                 document.getElementById('textSize').value = 16;
                 document.getElementById('borderColor').value = "#ffffff";
                 document.getElementById('borderWidth').value = 3;
+                adjustCanvasScale();
+                drawPlaceholder();
                 rebuildAll();
             }
         }
@@ -555,10 +551,7 @@
 
             if (baseImage) {
                 drawBaseImage();
-            } else {
-                drawPlaceholder();
             }
-            rebuildAll();
         }
 
         function drawPlaceholder() {
@@ -579,6 +572,7 @@
                 img.onload = () => {
                     baseImage = img;
                     adjustCanvasScale();
+                    rebuildAll();
                 };
                 img.src = event.target.result;
             };
@@ -626,7 +620,6 @@
             }
         }
 
-        // 超かわいいぷっくりハートを描く完全版ベジェ曲線
         function getShapePath2D(s) {
             const path = new Path2D();
             const { x, y, size, type, rotation = 0 } = s;
@@ -644,23 +637,19 @@
             };
 
             if (type === 'heart') {
-                // ハート全体の幅と高さをサイズから定義
                 const w = size / 2;
                 const h = size / 2;
 
-                // 各基準点を完璧なバランスに調整
-                let pBottom = transformPoint(x, y + h * 0.95);       // 最下部の尖り
-                let cp1_l   = transformPoint(x - w * 1.2, y + h * 0.3); // 左下へのふくらみ
-                let cp2_l   = transformPoint(x - w * 1.1, y - h * 0.9); // 左上の丸み（お椀）
-                let pTopL   = transformPoint(x, y - h * 0.25);       // 上部中央のくぼみ
+                let pBottom = transformPoint(x, y + h * 0.95);
+                let cp1_l   = transformPoint(x - w * 1.2, y + h * 0.3);
+                let cp2_l   = transformPoint(x - w * 1.1, y - h * 0.9);
+                let pTopL   = transformPoint(x, y - h * 0.25);
 
-                let cp2_r   = transformPoint(x + w * 1.1, y - h * 0.9); // 右上の丸み（お椀）
-                let cp1_r   = transformPoint(x + w * 1.2, y + h * 0.3); // 右下へのふくらみ
+                let cp2_r   = transformPoint(x + w * 1.1, y - h * 0.9);
+                let cp1_r   = transformPoint(x + w * 1.2, y + h * 0.3);
 
                 path.moveTo(pBottom.x, pBottom.y);
-                // 左側の曲線（下から左上の丸みを通って上部中央のくぼみへ）
                 path.bezierCurveTo(cp1_l.x, cp1_l.y, cp2_l.x, cp2_l.y, pTopL.x, pTopL.y);
-                // 右側の曲線（上部中央のくぼみから右上の丸みを通って下部の尖りへ）
                 path.bezierCurveTo(cp2_r.x, cp2_r.y, cp1_r.x, cp1_r.y, pBottom.x, pBottom.y);
                 path.closePath();
 
@@ -719,11 +708,6 @@
         }
 
         function processSegmentation() {
-            const savedStates = {};
-            layerRegions.forEach(l => {
-                savedStates[l.id] = l.isVisible;
-            });
-
             cutoutContainer.innerHTML = '';
             layerRegions = [];
 
@@ -789,14 +773,11 @@
 
                     cutoutContainer.appendChild(layerCanvas);
 
-                    const isVis = savedStates[regionId] !== undefined ? savedStates[regionId] : true;
-                    layerCanvas.style.display = isVis ? 'block' : 'none';
-
                     layerRegions.push({
                         id: regionId,
                         name: displayName,
                         path: rectPath,
-                        isVisible: isVis,
+                        isVisible: true,
                         canvas: layerCanvas,
                         type: 'grid'
                     });
@@ -834,19 +815,19 @@
 
                 cutoutContainer.appendChild(layerCanvas);
 
-                const isVis = savedStates[regionId] !== undefined ? savedStates[regionId] : true;
-                layerCanvas.style.display = isVis ? 'block' : 'none';
-
                 layerRegions.push({
                     id: regionId,
                     name: displayName,
                     path: shapePath,
-                    isVisible: isVis,
+                    isVisible: true,
                     canvas: layerCanvas,
                     type: 'shape',
                     shapeObj: s
                 });
             });
+
+            // 保存されていた表示状態（開閉状態）をここで復元適用する
+            applySavedVisibility();
 
             drawOverlay();
             saveState();
@@ -1170,9 +1151,11 @@
             }
         }
 
+        let pendingVisibility = null;
+
         function loadSavedState() {
             const saved = localStorage.getItem('panel_tool_state');
-            if (!saved) return null;
+            if (!saved) return;
 
             try {
                 const state = JSON.parse(saved);
@@ -1186,12 +1169,24 @@
                 
                 if (state.shapes) shapes = state.shapes;
                 if (state.customNames) customNames = state.customNames;
-
-                return state.visibility || null;
+                if (state.visibility) pendingVisibility = state.visibility;
             } catch (e) {
                 console.warn('保存データの読み込みに失敗しました:', e);
-                return null;
             }
+        }
+
+        function applySavedVisibility() {
+            if (!pendingVisibility) return;
+            layerRegions.forEach(l => {
+                if (pendingVisibility[l.id] !== undefined) {
+                    l.isVisible = pendingVisibility[l.id];
+                    l.canvas.style.display = l.isVisible ? 'block' : 'none';
+                    const icon = document.getElementById(`vis_icon_${l.id}`);
+                    if (icon) icon.textContent = l.isVisible ? '👁️' : '🙈';
+                }
+            });
+            pendingVisibility = null;
+            updateCounters();
         }
     </script>
 </body>
